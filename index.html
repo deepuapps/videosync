@@ -3,195 +3,163 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pro Remote - Executive Edition</title>
+    <title>Master Remote - Cinema HUD</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
-        :root { --primary: #6366f1; --accent: #fbbf24; --bg: #05070a; --glass: rgba(15, 23, 42, 0.9); }
-        body, html { margin: 0; padding: 0; width: 100vw; height: 100vh; background: var(--bg); color: #fff; font-family: 'Inter', sans-serif; overflow: hidden; }
+        :root { --primary: #6366f1; --accent: #fbbf24; --bg: #000; --glass: rgba(15, 23, 42, 0.8); }
+        body, html { margin: 0; padding: 0; width: 100vw; height: 100vh; background: #000; color: #fff; font-family: 'Inter', sans-serif; overflow: hidden; }
 
-        /* Video Stage */
-        #stage { 
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
-            display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; 
+        /* Video Layer - Always Fullscreen */
+        #stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 1; }
+        #vContainer { transition: transform 0.3s ease-out; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+        video { width: 100%; height: 100%; object-fit: contain; }
+
+        /* Cinema HUD Overlay */
+        .hud { 
+            position: fixed; bottom: 0; left: 0; width: 100%; 
+            background: linear-gradient(transparent, rgba(0,0,0,0.9)); 
+            padding: 40px 20px 20px; z-index: 100;
+            transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s;
         }
-        #videoContainer { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); will-change: transform; display: flex; align-items: center; justify-content: center; }
-        video { max-width: 100%; max-height: 100%; pointer-events: none; }
-
-        /* Remote Interface Overlay */
-        #remoteView { position: absolute; inset: 0; display: none; background: var(--bg); z-index: 60; flex-direction: column; align-items: center; justify-content: center; }
-
-        /* Floating UI Control */
-        .dock { 
-            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); 
-            width: 94%; max-width: 500px; background: var(--glass); backdrop-filter: blur(25px); 
-            border: 1px solid rgba(255,255,255,0.1); border-radius: 24px; padding: 20px; z-index: 100;
-            transition: opacity 0.5s, transform 0.5s;
-        }
-        .dock.autohide { opacity: 0; transform: translate(-50%, 50px); pointer-events: none; }
+        .hud.hidden { transform: translateY(100%); opacity: 0; pointer-events: none; }
         
-        .grid-ctrl { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 15px; }
+        .cntrl-row { display: flex; align-items: center; gap: 12px; max-width: 800px; margin: 0 auto; }
+        .grid-compact { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-top: 15px; max-width: 800px; margin-left: auto; margin-right: auto; }
+        
         button { 
-            padding: 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); 
-            background: rgba(255,255,255,0.05); color: #fff; font-size: 11px; font-weight: bold; cursor: pointer;
+            padding: 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); 
+            background: var(--glass); color: #fff; font-size: 10px; font-weight: bold; cursor: pointer; backdrop-filter: blur(10px);
         }
-        button:active { background: var(--primary); }
+        button:hover { background: var(--primary); }
+        
+        input[type="text"] { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid #333; background: #000; color: #fff; font-size: 13px; }
+        #seeker { width: 100%; accent-color: var(--primary); margin-bottom: 10px; cursor: pointer; }
 
-        input[type="text"] { 
-            width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #333; 
-            background: #000; color: #fff; margin-bottom: 10px; box-sizing: border-box;
-        }
-        #seeker { width: 100%; accent-color: var(--primary); margin: 10px 0; }
-        #feedback { 
-            position: fixed; top: 10%; left: 50%; transform: translateX(-50%); 
-            background: var(--accent); color: #000; padding: 8px 20px; border-radius: 20px; 
-            font-weight: bold; opacity: 0; transition: 0.3s; pointer-events: none; z-index: 200;
-        }
+        /* Setup Screen */
+        #setup { position: fixed; inset: 0; background: #05070a; z-index: 1000; display: flex; align-items: center; justify-content: center; }
+        .card { background: #111; padding: 30px; border-radius: 20px; width: 300px; text-align: center; border: 1px solid #222; }
+        
+        #feedback { position: fixed; top: 50px; left: 50%; transform: translateX(-50%); background: var(--accent); color: #000; padding: 5px 15px; border-radius: 20px; font-weight: bold; opacity: 0; z-index: 200; pointer-events: none; transition: 0.3s; }
     </style>
 </head>
-<body onmousemove="resetHideTimer()" onclick="resetHideTimer()" ontouchstart="resetHideTimer()">
+<body onmousemove="showHUD()" onclick="showHUD()" ontouchstart="showHUD()">
+
+    <div id="setup">
+        <div class="card">
+            <h2 style="color:var(--primary); margin-bottom:20px;">CINEMA LINK</h2>
+            <input type="text" id="pass" placeholder="Room Code" style="width:100%; margin-bottom:10px; box-sizing:border-box; padding:12px; border-radius:8px; border:1px solid #333; background:#000; color:#fff;">
+            <button style="width:100%; margin-bottom:10px; padding:12px; background:var(--primary); border:none;" onclick="start('player')">AS PLAYER</button>
+            <button style="width:100%; background:transparent;" onclick="start('remote')">AS REMOTE</button>
+        </div>
+    </div>
 
     <div id="stage">
-        <div id="videoContainer">
+        <div id="vContainer">
             <video id="mainVid" playsinline></video>
         </div>
     </div>
 
-    <div id="remoteView">
-        <h2 id="roomDisplay" style="color:var(--accent); letter-spacing: 2px;">REMOTE ACTIVE</h2>
-        <div style="opacity: 0.4; font-size: 10px;">CONTROLLING PLAYER...</div>
-    </div>
+    <div id="feedback">SYNCED</div>
 
-    <div id="feedback">COMMAND SENT</div>
-
-    <div class="dock" id="ui">
-        <div id="setup-tab">
-            <input type="text" id="passcode" placeholder="Organization Token">
-            <div style="display:flex; gap:10px;">
-                <button style="flex:1" onclick="init('player')">BE PLAYER</button>
-                <button style="flex:1; background:var(--primary)" onclick="init('remote')">BE REMOTE</button>
-            </div>
+    <div class="hud" id="hud">
+        <input type="range" id="seeker" value="0" step="0.1">
+        <div class="cntrl-row">
+            <input type="text" id="url" placeholder="Paste URL here...">
+            <button onclick="cmd('URL', document.getElementById('url').value)">LOAD</button>
+            <button onclick="toggleFS()">[ ]</button>
         </div>
-
-        <div id="ctrl-tab" style="display:none;">
-            <div style="display:flex; gap:8px;">
-                <input type="text" id="urlIn" placeholder="Enter Video URL..." style="margin-bottom:0;">
-                <button onclick="goFullscreen()" style="background:#1e293b;">FS</button>
-            </div>
-            <input type="range" id="seeker" value="0" step="0.1">
-            
-            <div class="grid-ctrl">
-                <button onclick="trigger('PLAY')">PLAY/PAUSE</button>
-                <button onclick="trigger('URL', document.getElementById('urlIn').value)">PUSH URL</button>
-                <button onclick="trigger('SEEK', -15)">-15s</button>
-                <button onclick="trigger('SEEK', 15)">+15s</button>
-                
-                <button onclick="trigger('RATE', 1)">1.0x</button>
-                <button onclick="trigger('RATE', 2)">2.0x</button>
-                <button onclick="trigger('ZOOM', 2)">ZOOM 2x</button>
-                <button onclick="trigger('ZOOM', 1)">RESET</button>
-
-                <button onclick="trigger('ROTATE', 90)">ROTATE</button>
-                <button onclick="trigger('PAN', 'x')">PAN X</button>
-                <button onclick="trigger('PAN', 'y')">PAN Y</button>
-                <button onclick="trigger('PAN', 'reset')">CENTER</button>
-            </div>
+        <div class="grid-compact">
+            <button onclick="cmd('PLAY')">P/P</button>
+            <button onclick="cmd('SEEK', -15)">-15s</button>
+            <button onclick="cmd('SEEK', 15)">+15s</button>
+            <button onclick="cmd('RATE', 2)">2.0x</button>
+            <button onclick="cmd('RATE', 1)">1.0x</button>
+            <button onclick="cmd('ROTATE', 90)">ROT</button>
+            <button onclick="cmd('ZOOM', 2)">Z 2x</button>
+            <button onclick="cmd('ZOOM', 4)">Z 4x</button>
+            <button onclick="cmd('PAN', 'x')">P-X</button>
+            <button onclick="cmd('PAN', 'y') Baby">P-Y</button>
+            <button onclick="cmd('PAN', 'reset')">RST</button>
+            <button id="modeInd" style="border-color:var(--accent)">P</button>
         </div>
     </div>
 
     <script>
-        let peer, conn, role, hideThread;
+        let peer, conn, role, hudTimer, lastTap = 0;
         const v = document.getElementById('mainVid');
-        const container = document.getElementById('videoContainer');
-        const ui = document.getElementById('ui');
-        const state = { zoom: 1, rotate: 0, x: 0, y: 0 };
+        const vc = document.getElementById('vContainer');
+        const st = { z: 1, r: 0, x: 0, y: 0 };
 
-        function init(r) {
+        function start(r) {
             role = r;
-            const code = document.getElementById('passcode').value;
-            if(!code) return alert("Token Required");
-            
+            const code = document.getElementById('pass').value;
+            if(!code) return alert("Enter Code");
             peer = new Peer(role === 'player' ? code + "-p" : code + "-r");
             peer.on('open', () => {
-                document.getElementById('setup-tab').style.display = 'none';
-                document.getElementById('ctrl-tab').style.display = 'block';
-                if(role === 'remote') {
-                    document.getElementById('remoteView').style.display = 'flex';
-                    connect(code + "-p");
-                } else {
-                    resetHideTimer(); // Start autohide for player
-                }
+                document.getElementById('setup').style.display = 'none';
+                document.getElementById('modeInd').innerText = role[0].toUpperCase();
+                if(role === 'remote') connect(code + "-p");
+                showHUD();
             });
-            peer.on('connection', c => { conn = c; setupConn(); });
+            peer.on('connection', c => { conn = c; setup(); });
         }
 
-        function connect(id) { conn = peer.connect(id); setupConn(); }
-
-        function setupConn() {
-            conn.on('open', () => showFeedback("PAIRED"));
-            conn.on('data', data => execute(data)); // Both can now receive/sync
+        function connect(id) { conn = peer.connect(id); setup(); }
+        function setup() { 
+            conn.on('open', () => { alertSound(); toast("LINKED"); });
+            conn.on('data', d => doCmd(d)); 
         }
 
-        function trigger(type, val) {
-            // Send to peer if connected
-            if(conn && conn.open) conn.send({type, val});
-            // ALWAYS execute locally as well so Player buttons work
-            execute({type, val});
+        function cmd(type, val) {
+            const payload = {type, val};
+            if(conn && conn.open) conn.send(payload);
+            doCmd(payload); // Local execution for Player
         }
 
-        function execute(cmd) {
-            if(cmd.type === 'URL' && cmd.val) { v.src = cmd.val; v.play(); }
-            if(cmd.type === 'PLAY') v.paused ? v.play() : v.pause();
-            if(cmd.type === 'SEEK') v.currentTime += cmd.val;
-            if(cmd.type === 'SEEK_ABS') v.currentTime = cmd.val;
-            if(cmd.type === 'RATE') v.playbackRate = cmd.val;
-            
-            if(cmd.type === 'ZOOM') state.zoom = cmd.val;
-            if(cmd.type === 'ROTATE') state.rotate = (state.rotate + cmd.val) % 360;
-            if(cmd.type === 'PAN') {
-                if(cmd.val === 'x') state.x += 20;
-                if(cmd.val === 'y') state.y += 20;
-                if(cmd.val === 'reset') { state.x = 0; state.y = 0; state.zoom = 1; state.rotate = 0; }
+        function doCmd(c) {
+            if(c.type === 'URL') { v.src = c.val; v.play(); }
+            if(c.type === 'PLAY') v.paused ? v.play() : v.pause();
+            if(c.type === 'SEEK') v.currentTime += c.val;
+            if(c.type === 'SEEK_ABS') v.currentTime = c.val;
+            if(c.type === 'RATE') v.playbackRate = c.val;
+            if(c.type === 'ZOOM') st.z = c.val;
+            if(c.type === 'ROTATE') st.r = (st.r + c.val) % 360;
+            if(c.type === 'PAN') {
+                if(c.val === 'x') st.x += 30;
+                if(c.val === 'y') st.y += 30;
+                if(c.val === 'reset') { st.x=0; st.y=0; st.z=1; st.r=0; v.playbackRate=1; }
             }
-            
-            updateVisuals();
-            showFeedback(cmd.type);
+            vc.style.transform = `scale(${st.z}) rotate(${st.r}deg) translate(${st.x}px, ${st.y}px)`;
+            toast(c.type);
         }
 
-        function updateVisuals() {
-            container.style.transform = `scale(${state.zoom}) rotate(${state.rotate}deg) translate(${state.x}px, ${state.y}px)`;
+        function showHUD() {
+            document.getElementById('hud').classList.remove('hidden');
+            clearTimeout(hudTimer);
+            hudTimer = setTimeout(() => {
+                if(!v.paused) document.getElementById('hud').classList.add('hidden');
+            }, 3500);
         }
 
-        function resetHideTimer() {
-            if(role !== 'player') return;
-            ui.classList.remove('autohide');
-            clearTimeout(hideThread);
-            hideThread = setTimeout(() => {
-                ui.classList.add('autohide');
-            }, 3000);
+        function toggleFS() {
+            if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+            else document.exitFullscreen();
         }
 
-        function goFullscreen() {
-            const elem = document.documentElement;
-            if (elem.requestFullscreen) elem.requestFullscreen();
-            else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
-            else if (elem.msRequestFullscreen) elem.msRequestFullscreen();
-        }
-
-        function showFeedback(txt) {
+        function toast(msg) {
             const f = document.getElementById('feedback');
-            f.innerText = txt; f.style.opacity = 1;
+            f.innerText = msg; f.style.opacity = 1;
             setTimeout(() => f.style.opacity = 0, 800);
         }
 
-        // Sync Seekbar
+        function alertSound() { if(window.navigator.vibrate) navigator.vibrate(100); }
+
         v.ontimeupdate = () => {
-            if(!v.duration) return;
-            document.getElementById('seeker').value = (v.currentTime / v.duration) * 100;
+            if(v.duration) document.getElementById('seeker').value = (v.currentTime / v.duration) * 100;
         };
 
         document.getElementById('seeker').oninput = (e) => {
-            const time = (e.target.value / 100) * v.duration;
-            trigger('SEEK_ABS', time);
+            cmd('SEEK_ABS', (e.target.value / 100) * v.duration);
         };
     </script>
 </body>
