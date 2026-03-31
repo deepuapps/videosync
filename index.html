@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pro Remote - Cinema Edition</title>
+    <title>Pro Remote - Executive Edition</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         :root { --primary: #6366f1; --accent: #fbbf24; --bg: #05070a; --glass: rgba(15, 23, 42, 0.9); }
@@ -14,19 +14,20 @@
             position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
             display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; 
         }
-        #videoContainer { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); will-change: transform; }
+        #videoContainer { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); will-change: transform; display: flex; align-items: center; justify-content: center; }
         video { max-width: 100%; max-height: 100%; pointer-events: none; }
 
-        /* Remote Interface */
+        /* Remote Interface Overlay */
         #remoteView { position: absolute; inset: 0; display: none; background: var(--bg); z-index: 60; flex-direction: column; align-items: center; justify-content: center; }
-        .gesture-hint { opacity: 0.3; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; }
 
         /* Floating UI Control */
         .dock { 
             position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); 
-            width: 94%; max-width: 500px; background: var(--glass); backdrop-filter: blur(20px); 
+            width: 94%; max-width: 500px; background: var(--glass); backdrop-filter: blur(25px); 
             border: 1px solid rgba(255,255,255,0.1); border-radius: 24px; padding: 20px; z-index: 100;
+            transition: opacity 0.5s, transform 0.5s;
         }
+        .dock.autohide { opacity: 0; transform: translate(-50%, 50px); pointer-events: none; }
         
         .grid-ctrl { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 15px; }
         button { 
@@ -34,20 +35,20 @@
             background: rgba(255,255,255,0.05); color: #fff; font-size: 11px; font-weight: bold; cursor: pointer;
         }
         button:active { background: var(--primary); }
-        .active-mode { border-color: var(--accent); color: var(--accent); }
 
-        input[type="text"], input[type="range"] { 
+        input[type="text"] { 
             width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #333; 
-            background: #000; color: #fff; margin-bottom: 10px; 
+            background: #000; color: #fff; margin-bottom: 10px; box-sizing: border-box;
         }
+        #seeker { width: 100%; accent-color: var(--primary); margin: 10px 0; }
         #feedback { 
-            position: fixed; top: 20%; left: 50%; transform: translateX(-50%); 
+            position: fixed; top: 10%; left: 50%; transform: translateX(-50%); 
             background: var(--accent); color: #000; padding: 8px 20px; border-radius: 20px; 
             font-weight: bold; opacity: 0; transition: 0.3s; pointer-events: none; z-index: 200;
         }
     </style>
 </head>
-<body>
+<body onmousemove="resetHideTimer()" onclick="resetHideTimer()" ontouchstart="resetHideTimer()">
 
     <div id="stage">
         <div id="videoContainer">
@@ -56,15 +57,15 @@
     </div>
 
     <div id="remoteView">
-        <div class="gesture-hint">Remote Control Active</div>
-        <h2 id="roomDisplay" style="color:var(--accent)">-</h2>
+        <h2 id="roomDisplay" style="color:var(--accent); letter-spacing: 2px;">REMOTE ACTIVE</h2>
+        <div style="opacity: 0.4; font-size: 10px;">CONTROLLING PLAYER...</div>
     </div>
 
     <div id="feedback">COMMAND SENT</div>
 
     <div class="dock" id="ui">
         <div id="setup-tab">
-            <input type="text" id="passcode" placeholder="Enter Room Token">
+            <input type="text" id="passcode" placeholder="Organization Token">
             <div style="display:flex; gap:10px;">
                 <button style="flex:1" onclick="init('player')">BE PLAYER</button>
                 <button style="flex:1; background:var(--primary)" onclick="init('remote')">BE REMOTE</button>
@@ -72,7 +73,10 @@
         </div>
 
         <div id="ctrl-tab" style="display:none;">
-            <input type="text" id="urlIn" placeholder="Paste Video URL...">
+            <div style="display:flex; gap:8px;">
+                <input type="text" id="urlIn" placeholder="Enter Video URL..." style="margin-bottom:0;">
+                <button onclick="goFullscreen()" style="background:#1e293b;">FS</button>
+            </div>
             <input type="range" id="seeker" value="0" step="0.1">
             
             <div class="grid-ctrl">
@@ -81,8 +85,8 @@
                 <button onclick="trigger('SEEK', -15)">-15s</button>
                 <button onclick="trigger('SEEK', 15)">+15s</button>
                 
-                <button onclick="trigger('RATE', 1)">1x</button>
-                <button onclick="trigger('RATE', 2)">2x</button>
+                <button onclick="trigger('RATE', 1)">1.0x</button>
+                <button onclick="trigger('RATE', 2)">2.0x</button>
                 <button onclick="trigger('ZOOM', 2)">ZOOM 2x</button>
                 <button onclick="trigger('ZOOM', 1)">RESET</button>
 
@@ -94,27 +98,27 @@
         </div>
     </div>
 
-    <div id="gestureArea" style="position:fixed; inset:0; z-index:50;"></div>
-
     <script>
-        let peer, conn, role, lastTap = 0;
+        let peer, conn, role, hideThread;
         const v = document.getElementById('mainVid');
         const container = document.getElementById('videoContainer');
+        const ui = document.getElementById('ui');
         const state = { zoom: 1, rotate: 0, x: 0, y: 0 };
 
         function init(r) {
             role = r;
             const code = document.getElementById('passcode').value;
-            if(!code) return alert("Enter Token");
+            if(!code) return alert("Token Required");
             
             peer = new Peer(role === 'player' ? code + "-p" : code + "-r");
             peer.on('open', () => {
                 document.getElementById('setup-tab').style.display = 'none';
                 document.getElementById('ctrl-tab').style.display = 'block';
-                document.getElementById('roomDisplay').innerText = code.toUpperCase();
                 if(role === 'remote') {
                     document.getElementById('remoteView').style.display = 'flex';
                     connect(code + "-p");
+                } else {
+                    resetHideTimer(); // Start autohide for player
                 }
             });
             peer.on('connection', c => { conn = c; setupConn(); });
@@ -123,27 +127,30 @@
         function connect(id) { conn = peer.connect(id); setupConn(); }
 
         function setupConn() {
-            conn.on('open', () => showFeedback("LINKED"));
-            conn.on('data', data => role === 'player' ? execute(data) : null);
+            conn.on('open', () => showFeedback("PAIRED"));
+            conn.on('data', data => execute(data)); // Both can now receive/sync
         }
 
         function trigger(type, val) {
+            // Send to peer if connected
             if(conn && conn.open) conn.send({type, val});
-            else if(role === 'player') execute({type, val});
+            // ALWAYS execute locally as well so Player buttons work
+            execute({type, val});
         }
 
         function execute(cmd) {
-            if(cmd.type === 'URL') { v.src = cmd.val; v.play(); }
+            if(cmd.type === 'URL' && cmd.val) { v.src = cmd.val; v.play(); }
             if(cmd.type === 'PLAY') v.paused ? v.play() : v.pause();
             if(cmd.type === 'SEEK') v.currentTime += cmd.val;
+            if(cmd.type === 'SEEK_ABS') v.currentTime = cmd.val;
             if(cmd.type === 'RATE') v.playbackRate = cmd.val;
             
             if(cmd.type === 'ZOOM') state.zoom = cmd.val;
             if(cmd.type === 'ROTATE') state.rotate = (state.rotate + cmd.val) % 360;
             if(cmd.type === 'PAN') {
-                if(cmd.val === 'x') state.x += 10;
-                if(cmd.val === 'y') state.y += 10;
-                if(cmd.val === 'reset') { state.x = 0; state.y = 0; state.zoom = 1; }
+                if(cmd.val === 'x') state.x += 20;
+                if(cmd.val === 'y') state.y += 20;
+                if(cmd.val === 'reset') { state.x = 0; state.y = 0; state.zoom = 1; state.rotate = 0; }
             }
             
             updateVisuals();
@@ -154,25 +161,21 @@
             container.style.transform = `scale(${state.zoom}) rotate(${state.rotate}deg) translate(${state.x}px, ${state.y}px)`;
         }
 
-        // --- Gesture Engine ---
-        const gestureArea = document.getElementById('gestureArea');
-        let touchStart = {x:0, y:0};
+        function resetHideTimer() {
+            if(role !== 'player') return;
+            ui.classList.remove('autohide');
+            clearTimeout(hideThread);
+            hideThread = setTimeout(() => {
+                ui.classList.add('autohide');
+            }, 3000);
+        }
 
-        gestureArea.addEventListener('touchstart', e => {
-            touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-            const now = Date.now();
-            if(now - lastTap < 300) {
-                const dir = touchStart.x > window.innerWidth/2 ? 15 : -15;
-                trigger('SEEK', dir);
-            }
-            lastTap = now;
-        });
-
-        gestureArea.addEventListener('touchend', e => {
-            const deltaY = e.changedTouches[0].clientY - touchStart.y;
-            if(deltaY < -100) trigger('RATE', 2); // Swipe Up = 2x
-            if(deltaY > 100) trigger('RATE', 1);  // Swipe Down = 1x
-        });
+        function goFullscreen() {
+            const elem = document.documentElement;
+            if (elem.requestFullscreen) elem.requestFullscreen();
+            else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
+            else if (elem.msRequestFullscreen) elem.msRequestFullscreen();
+        }
 
         function showFeedback(txt) {
             const f = document.getElementById('feedback');
@@ -180,12 +183,16 @@
             setTimeout(() => f.style.opacity = 0, 800);
         }
 
-        // Sync Seeker
-        v.ontimeupdate = () => { if(role === 'player') document.getElementById('seeker').value = (v.currentTime / v.duration) * 100; };
+        // Sync Seekbar
+        v.ontimeupdate = () => {
+            if(!v.duration) return;
+            document.getElementById('seeker').value = (v.currentTime / v.duration) * 100;
+        };
+
         document.getElementById('seeker').oninput = (e) => {
             const time = (e.target.value / 100) * v.duration;
             trigger('SEEK_ABS', time);
         };
     </script>
 </body>
-</html> 
+</html>
